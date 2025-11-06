@@ -18,7 +18,7 @@ Model Context Protocol (MCP) 서버로 **다중 데이터베이스**와 AI 에�
 
 ## 🚀 Claude Code에서 사용하기
 
-Claude Code 환경에서 이 DB MCP 서버를 사용하려면 [Claude Code 사용 가이드](./CLAUDE_CODE_GUIDE.md)를 참조하세요.
+Claude Code 환경에서 이 DB MCP 서버를 사용하려면 [Claude Code 사용 가이드](./docs/CLAUDE_CODE_GUIDE.md)를 참조하세요.
 
 **빠른 시작:**
 1. 환경 변수 설정 (`.env` 파일)
