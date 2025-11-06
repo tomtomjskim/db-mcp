@@ -154,9 +154,9 @@ DB_DEFAULT_CONNECTION=user
 }
 ```
 
-#### Claude Code 설정 (다중 DB - Phase 4 개선)
+#### Claude Code 설정 (다중 DB - 간소화된 방식)
 
-**Phase 4 개선 사항**: 환경변수 간소화를 통한 설정 단순화 (8개 → 3개)
+**개선된 설정 방식**: 환경변수 간소화를 통한 설정 단순화 (8개 → 3개)
 
 `~/.claude.json` 파일에 추가:
 ```json
@@ -175,7 +175,7 @@ DB_DEFAULT_CONNECTION=user
 }
 ```
 
-**Phase 4의 핵심 개선점**:
+**핵심 개선점**:
 - ✅ **불필요한 dummy 환경변수 제거**: MYSQL_HOST, MYSQL_PORT, MYSQL_DB, MYSQL_USER, MYSQL_PASSWORD 불필요
 - ✅ **진정한 멀티테넌트 서버**: DB_CONFIG_FILE만으로 모든 연결 관리
 - ✅ **코드 레벨 개선**: `src/config/index.ts`에서 multi-DB 모드 자동 감지
