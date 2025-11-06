@@ -1,0 +1,66 @@
+{
+  "name": "db-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for database operations with AI agents",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "database",
+    "mysql",
+    "ai",
+    "claude",
+    "anthropic"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@types/pg": "^8.15.5",
+    "dotenv": "^16.3.1",
+    "joi": "^17.11.0",
+    "mysql2": "^3.6.0",
+    "pg": "^8.16.3",
+    "winston": "^3.11.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.5",
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "eslint": "^8.50.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.0.3",
+    "ts-jest": "^29.1.1",
+    "tsx": "^3.14.0",
+    "typescript": "^5.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/db-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/db-mcp/issues"
+  },
+  "homepage": "https://github.com/yourusername/db-mcp#readme"
+}

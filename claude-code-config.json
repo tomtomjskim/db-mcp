@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "database": {
+      "command": "node",
+      "args": ["./dist/index.js"],
+      "cwd": "/path/to/your/db-mcp",
+      "env": {
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+        "MYSQL_DB": "your_database_name",
+        "MYSQL_USER": "your_username",
+        "MYSQL_PASSWORD": "your_password",
+        "LOG_LEVEL": "info",
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}

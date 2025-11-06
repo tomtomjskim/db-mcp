@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run build:*)",
+      "Bash(npm test)",
+      "Bash(npm run lint)",
+      "Bash(brew install:*)",
+      "Bash(gh auth login:*)",
+      "Bash(git init:*)",
+      "Bash(git branch:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Database MCP Server\n\nEnterprise-ready Model Context Protocol server that enables AI agents to interact with multiple databases simultaneously. Supports MySQL and PostgreSQL with features including multi-database management, natural language queries, schema analysis, and data profiling.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

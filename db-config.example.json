@@ -1,0 +1,112 @@
+{
+  "connections": {
+    "user-service": {
+      "name": "user-service",
+      "type": "mysql",
+      "host": "user-db.cluster-xxx.us-east-1.rds.amazonaws.com",
+      "port": 3306,
+      "user": "readonly_user",
+      "password": "secure_password",
+      "database": "user_service",
+      "description": "User service database - 사용자 정보 및 인증",
+      "tags": ["microservice", "user", "mysql", "production"],
+      "ssl": {
+        "mode": "REQUIRED"
+      },
+      "connectionLimit": 10,
+      "idleTimeout": 300000
+    },
+    "order-service": {
+      "name": "order-service",
+      "type": "postgresql",
+      "host": "order-db.cluster-yyy.us-east-1.rds.amazonaws.com",
+      "port": 5432,
+      "user": "readonly_user",
+      "password": "secure_password",
+      "database": "order_service",
+      "description": "Order service database - 주문 및 결제 정보",
+      "tags": ["microservice", "order", "postgresql", "production"],
+      "ssl": {
+        "mode": "REQUIRED"
+      },
+      "connectionLimit": 15,
+      "idleTimeout": 300000
+    },
+    "analytics": {
+      "name": "analytics",
+      "type": "postgresql",
+      "host": "analytics-db.cluster-zzz.us-east-1.rds.amazonaws.com",
+      "port": 5432,
+      "user": "analytics_user",
+      "password": "analytics_password",
+      "database": "analytics",
+      "description": "Analytics and reporting database - 데이터 분석 및 리포팅",
+      "tags": ["analytics", "reporting", "postgresql", "production"],
+      "ssl": {
+        "mode": "REQUIRED"
+      },
+      "connectionLimit": 20,
+      "idleTimeout": 600000
+    },
+    "product-service": {
+      "name": "product-service",
+      "type": "mysql",
+      "host": "product-db.cluster-aaa.us-east-1.rds.amazonaws.com",
+      "port": 3306,
+      "user": "readonly_user",
+      "password": "secure_password",
+      "database": "product_service",
+      "description": "Product catalog database - 상품 카탈로그",
+      "tags": ["microservice", "product", "mysql", "production"],
+      "ssl": {
+        "mode": "REQUIRED"
+      },
+      "connectionLimit": 12
+    },
+    "inventory-service": {
+      "name": "inventory-service",
+      "type": "postgresql",
+      "host": "inventory-db.cluster-bbb.us-east-1.rds.amazonaws.com",
+      "port": 5432,
+      "user": "readonly_user",
+      "password": "secure_password",
+      "database": "inventory_service",
+      "description": "Inventory management database - 재고 관리",
+      "tags": ["microservice", "inventory", "postgresql", "production"],
+      "ssl": {
+        "mode": "REQUIRED"
+      },
+      "connectionLimit": 8
+    },
+    "dev-playground": {
+      "name": "dev-playground",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "user": "dev_user",
+      "password": "dev_password",
+      "database": "playground",
+      "description": "Development playground database - 개발 테스트용",
+      "tags": ["development", "testing", "mysql", "local"],
+      "connectionLimit": 5
+    },
+    "frecto-dev": {
+      "name": "frecto-dev",
+      "type": "mysql",
+      "host": "your-rds-endpoint.rds.amazonaws.com",
+      "port": 3306,
+      "user": "dev_user",
+      "password": "your_password",
+      "database": "dev_burst_db",
+      "description": "Frecto E-commerce Development Database - 이커머스 개발 DB",
+      "tags": ["frecto", "ecommerce", "development", "mysql"],
+      "ssl": {
+        "mode": "DISABLED"
+      },
+      "connectionLimit": 10,
+      "idleTimeout": 300000
+    }
+  },
+  "defaultConnection": "user-service",
+  "_comment": "실제 사용 시: 1) 이 파일을 db-config.json으로 복사, 2) 민감한 정보 입력, 3) Git 커밋하지 않기 (gitignore 확인)"
+}
