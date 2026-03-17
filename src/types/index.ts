@@ -32,7 +32,7 @@ export interface SecurityConfig {
 
 export interface QueryResult {
   rows: any[];
-  fields: any[];
+  fields: string[];
   rowCount: number;
   executionTime: number;
   truncated?: boolean;

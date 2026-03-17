@@ -197,15 +197,9 @@ export class QueryExecutor {
     }
   }
 
-  private extractFields(results: any[]): any[] {
+  private extractFields(results: any[]): string[] {
     if (results.length === 0) return [];
-
-    const firstRow = results[0];
-    return Object.keys(firstRow).map(key => ({
-      name: key,
-      type: typeof firstRow[key],
-      nullable: firstRow[key] === null,
-    }));
+    return Object.keys(results[0]);
   }
 
   private generateCacheKey(query: string, parameters: any[]): string {

@@ -14,6 +14,15 @@ import { DataProfiler } from '../database/data-profiler.js';
 import { SchemaCache } from '../database/schema-cache.js';
 import { databaseConfig, securityConfig, serverConfig, validateConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import {
+  formatExecuteQueryResponse,
+  formatErrorResponse,
+  toCompactJSON,
+  injectAutoLimit,
+  isSchemaQuery,
+  QueryResponseOptions,
+  ResponseFormat,
+} from '../utils/response-formatter.js';
 
 export class DatabaseMCPServer {
   private server: Server;
@@ -60,7 +69,7 @@ export class DatabaseMCPServer {
         tools: [
           {
             name: 'execute_query',
-            description: 'Execute a SQL query against the database (read-only operations only)',
+            description: 'Execute a SQL query (read-only). Response: compact Array-of-Arrays {columns:[...], rows:[[...],...]}. SHOW COLUMNS auto-formats as lightweight text. SELECT without LIMIT gets auto LIMIT 50.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -81,6 +90,19 @@ export class DatabaseMCPServer {
                     maxRows: { type: 'number' },
                     dryRun: { type: 'boolean' },
                   },
+                },
+                format: {
+                  type: 'string',
+                  enum: ['compact', 'table', 'minimal'],
+                  description: 'Response format. compact=JSON Array-of-Arrays(default), table=TSV text, minimal=sample 5 rows+summary',
+                },
+                maxRows: {
+                  type: 'number',
+                  description: 'Max rows to return (default 50). Explicitly increase for larger datasets',
+                },
+                preview: {
+                  type: 'boolean',
+                  description: 'If true, returns only 3 sample rows + total count (saves tokens)',
                 },
               },
               required: ['query'],
@@ -318,7 +340,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(status, null, 2),
+                text: JSON.stringify(status),
               },
             ],
           };
@@ -338,7 +360,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(sanitizedConfig, null, 2),
+                text: JSON.stringify(sanitizedConfig),
               },
             ],
           };
@@ -350,7 +372,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(queryCacheStats, null, 2),
+                text: JSON.stringify(queryCacheStats),
               },
             ],
           };
@@ -362,7 +384,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(auditLogs, null, 2),
+                text: JSON.stringify(auditLogs),
               },
             ],
           };
@@ -374,7 +396,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify({ patterns }, null, 2),
+                text: JSON.stringify({ patterns }),
               },
             ],
           };
@@ -386,7 +408,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(schema, null, 2),
+                text: JSON.stringify(schema),
               },
             ],
           };
@@ -398,7 +420,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(relationships, null, 2),
+                text: JSON.stringify(relationships),
               },
             ],
           };
@@ -410,7 +432,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(summary, null, 2),
+                text: JSON.stringify(summary),
               },
             ],
           };
@@ -422,7 +444,7 @@ export class DatabaseMCPServer {
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(schemaCacheStats, null, 2),
+                text: JSON.stringify(schemaCacheStats),
               },
             ],
           };
@@ -519,7 +541,7 @@ export class DatabaseMCPServer {
                 totalViews: schema!.views.length,
                 totalProcedures: schema!.procedures.length,
               },
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -533,7 +555,7 @@ export class DatabaseMCPServer {
             text: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -576,7 +598,7 @@ export class DatabaseMCPServer {
               success: true,
               profile,
               cached: !!await this.schemaCache.getTableProfile(databaseConfig.database, tableName),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -591,7 +613,7 @@ export class DatabaseMCPServer {
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
               tableName,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -621,7 +643,7 @@ export class DatabaseMCPServer {
               success: true,
               relationships: relationshipsObj,
               cached: !!await this.schemaCache.getTableRelationships(databaseConfig.database),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -635,7 +657,7 @@ export class DatabaseMCPServer {
             text: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -662,7 +684,7 @@ export class DatabaseMCPServer {
               success: true,
               message: pattern ? `Cache cleared for pattern: ${pattern}` : 'All cache cleared',
               remainingEntries: stats.totalEntries,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -676,7 +698,7 @@ export class DatabaseMCPServer {
             text: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -789,7 +811,7 @@ export class DatabaseMCPServer {
                 tableName,
                 profile,
                 cached: true,
-              }, null, 2),
+              }),
             },
           ],
         };
@@ -812,7 +834,7 @@ export class DatabaseMCPServer {
                 tableName,
                 tableInfo,
                 cached: true,
-              }, null, 2),
+              }),
             },
           ],
         };
@@ -829,7 +851,7 @@ export class DatabaseMCPServer {
               error: error instanceof Error ? error.message : 'Unknown error',
               tableName,
               action,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -838,40 +860,31 @@ export class DatabaseMCPServer {
 
   private async handleExecuteQuery(args: any) {
     const { query, parameters = [], options = {} } = args;
+    const responseOptions: QueryResponseOptions = {
+      format: args.format as ResponseFormat | undefined,
+      maxRows: args.maxRows as number | undefined,
+      preview: args.preview as boolean | undefined,
+    };
 
     if (!query || typeof query !== 'string') {
       throw new Error('Query is required and must be a string');
     }
 
     try {
-      const result = await this.queryExecutor.executeQuery(query, parameters, options);
+      // TIER 2: 자동 LIMIT 주입
+      let finalQuery = query;
+      if (!isSchemaQuery(query)) {
+        const limitResult = injectAutoLimit(query, responseOptions.maxRows);
+        finalQuery = limitResult.query;
+      }
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: true,
-              ...result,
-            }, null, 2),
-          },
-        ],
-      };
+      const result = await this.queryExecutor.executeQuery(finalQuery, parameters, options);
+
+      return formatExecuteQueryResponse(result, query, responseOptions);
     } catch (error) {
       logger.error('Query execution failed', { query, error });
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : 'Unknown error',
-              query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
-            }, null, 2),
-          },
-        ],
-      };
+      return formatErrorResponse(error);
     }
   }
 
@@ -899,7 +912,7 @@ export class DatabaseMCPServer {
                 explanation: nlResult.explanation,
                 suggestedImprovements: nlResult.suggestedImprovements,
                 executed: false,
-              }, null, 2),
+              }),
             },
           ],
         };
@@ -910,20 +923,20 @@ export class DatabaseMCPServer {
         enableAudit: true,
       });
 
+      const { formatQueryResult } = await import('../utils/response-formatter.js');
+      const compactResult = formatQueryResult(queryResult);
+
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
+            text: toCompactJSON({
               success: true,
-              question,
               generatedSQL: nlResult.sql,
               confidence: nlResult.confidence,
               explanation: nlResult.explanation,
-              suggestedImprovements: nlResult.suggestedImprovements,
-              queryResult,
-              executed: true,
-            }, null, 2),
+              ...compactResult,
+            }),
           },
         ],
       };
@@ -938,7 +951,7 @@ export class DatabaseMCPServer {
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
               question: question.substring(0, 200),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -963,7 +976,7 @@ export class DatabaseMCPServer {
               success: true,
               query: query.substring(0, 200),
               ...analysis,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -978,7 +991,7 @@ export class DatabaseMCPServer {
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
               query: query.substring(0, 100),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -1003,7 +1016,7 @@ export class DatabaseMCPServer {
               success: true,
               query: query.substring(0, 200),
               executionPlan: result,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -1018,7 +1031,7 @@ export class DatabaseMCPServer {
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
               query: query.substring(0, 100),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -1032,7 +1045,7 @@ export class DatabaseMCPServer {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(health, null, 2),
+            text: JSON.stringify(health),
           },
         ],
       };
@@ -1044,7 +1057,7 @@ export class DatabaseMCPServer {
             text: JSON.stringify({
               healthy: false,
               error: error instanceof Error ? error.message : 'Unknown error',
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -1066,7 +1079,7 @@ export class DatabaseMCPServer {
               version: dbInfo.version,
               user: dbInfo.current_user,
               connectionStatus: this.database.getConnectionStatus(),
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -1078,7 +1091,7 @@ export class DatabaseMCPServer {
             text: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : 'Unknown error',
-            }, null, 2),
+            }),
           },
         ],
       };

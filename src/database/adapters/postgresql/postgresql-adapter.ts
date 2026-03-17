@@ -235,14 +235,11 @@ export class PostgreSQLAdapter extends EventEmitter implements EventEmittingAdap
       // 메트릭스 업데이트
       this.updateMetrics(true, executionTime);
 
+      const pgRows = result.rows || [];
       const queryResult: QueryResult = {
-        rows: result.rows || [],
-        fields: result.fields ? result.fields.map(field => ({
-          name: field.name,
-          type: field.dataTypeID,
-          nullable: true // PostgreSQL은 기본적으로 필드 메타데이터에서 nullable 정보를 제공하지 않음
-        })) : [],
-        rowCount: result.rowCount || result.rows?.length || 0,
+        rows: pgRows,
+        fields: pgRows.length > 0 ? Object.keys(pgRows[0]) : (result.fields || []).map((f: any) => f.name || String(f)),
+        rowCount: result.rowCount || pgRows.length || 0,
         executionTime,
         metadata: {
           adapter: 'postgresql',
@@ -313,14 +310,11 @@ export class PostgreSQLAdapter extends EventEmitter implements EventEmittingAdap
           const result = await client.query(query.sql, query.params || []);
           const executionTime = Date.now() - startTime;
 
+          const txPgRows = result.rows || [];
           results.push({
-            rows: result.rows || [],
-            fields: result.fields ? result.fields.map(field => ({
-              name: field.name,
-              type: field.dataTypeID,
-              nullable: true
-            })) : [],
-            rowCount: result.rowCount || result.rows?.length || 0,
+            rows: txPgRows,
+            fields: txPgRows.length > 0 ? Object.keys(txPgRows[0]) : (result.fields || []).map((f: any) => f.name || String(f)),
+            rowCount: result.rowCount || txPgRows.length || 0,
             executionTime,
             metadata: {
               adapter: 'postgresql',

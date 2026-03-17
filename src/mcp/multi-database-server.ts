@@ -14,6 +14,16 @@ import { QueryExecutor } from '../database/query-executor.js';
 import { NaturalLanguageProcessor } from '../database/natural-language-processor.js';
 import { logger } from '../utils/logger.js';
 import { existsSync } from 'fs';
+import {
+  formatMultiDbQueryResponse,
+  formatErrorResponse,
+  formatSchemaCheckResponse,
+  toCompactJSON,
+  injectAutoLimit,
+  isSchemaQuery,
+  QueryResponseOptions,
+  ResponseFormat,
+} from '../utils/response-formatter.js';
 
 /**
  * 다중 데이터베이스 지원 MCP 서버
@@ -122,7 +132,7 @@ export class MultiDatabaseMCPServer {
         tools.push(
           {
             name: 'execute_query',
-            description: 'SQL 쿼리 실행 (읽기 전용)',
+            description: 'SQL 쿼리 실행 (읽기 전용). 응답은 compact Array-of-Arrays 형식: {columns:[...], rows:[[...],...]}}. SHOW COLUMNS는 자동으로 경량 텍스트 포맷 반환. LIMIT 없는 SELECT는 자동으로 LIMIT 50 적용.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -140,8 +150,40 @@ export class MultiDatabaseMCPServer {
                   description: '쿼리 파라미터 (선택사항)',
                   items: { type: 'string' },
                 },
+                format: {
+                  type: 'string',
+                  enum: ['compact', 'table', 'minimal'],
+                  description: '응답 포맷. compact=JSON Array-of-Arrays(기본), table=TSV 텍스트, minimal=샘플5행+요약',
+                },
+                maxRows: {
+                  type: 'number',
+                  description: '최대 반환 행 수 (기본 50). 큰 결과셋이 필요하면 명시적으로 늘릴 것',
+                },
+                preview: {
+                  type: 'boolean',
+                  description: 'true면 샘플 3행 + 총 행 수만 반환 (토큰 절약)',
+                },
               },
               required: ['query'],
+            },
+          },
+          {
+            name: 'schema_check',
+            description: '테이블 스키마 확인 (SHOW COLUMNS 대체). 경량 텍스트로 컬럼명, 타입, 키, NULL 여부 반환. 캐시 지원으로 반복 호출 시 토큰 절약.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                table: {
+                  type: 'string',
+                  description: '테이블명',
+                },
+                database: {
+                  type: 'string',
+                  description: '대상 데이터베이스',
+                  enum: connectionNames,
+                },
+              },
+              required: ['table'],
             },
           },
           {
@@ -246,7 +288,18 @@ export class MultiDatabaseMCPServer {
             return await this.handleExecuteQuery(
               args?.query as string,
               args?.database as string,
-              args?.parameters as string[]
+              args?.parameters as string[],
+              {
+                format: args?.format as ResponseFormat | undefined,
+                maxRows: args?.maxRows as number | undefined,
+                preview: args?.preview as boolean | undefined,
+              }
+            );
+
+          case 'schema_check':
+            return await this.handleSchemaCheck(
+              args?.table as string,
+              args?.database as string
             );
 
           case 'natural_language_query':
@@ -348,7 +401,7 @@ export class MultiDatabaseMCPServer {
               tags: conn.tags,
               isConnected: conn.isConnected,
             })),
-          }, null, 2),
+          }),
         },
       ],
     };
@@ -373,7 +426,7 @@ export class MultiDatabaseMCPServer {
               lastCheck: health.lastCheck,
               error: health.error,
               details: health.details,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -391,7 +444,7 @@ export class MultiDatabaseMCPServer {
                 averageResponseTime: Object.values(healthResults).reduce((sum, h) => sum + h.responseTime, 0) / Object.keys(healthResults).length,
               },
               databases: healthResults,
-            }, null, 2),
+            }),
           },
         ],
       };
@@ -399,9 +452,14 @@ export class MultiDatabaseMCPServer {
   }
 
   /**
-   * SQL 쿼리 실행
+   * SQL 쿼리 실행 (TIER 2: 자동 LIMIT, format/maxRows/preview 지원)
    */
-  private async handleExecuteQuery(query: string, database?: string, parameters?: string[]) {
+  private async handleExecuteQuery(
+    query: string,
+    database?: string,
+    parameters?: string[],
+    options?: QueryResponseOptions
+  ) {
     if (!query) {
       throw new Error('Query is required');
     }
@@ -412,25 +470,72 @@ export class MultiDatabaseMCPServer {
     }
     const adapter = this.connectionManager.getConnection(dbName);
 
-    const result = await adapter.query(query, parameters || []);
+    // TIER 2: 자동 LIMIT 주입 (스키마 쿼리 제외)
+    let finalQuery = query;
+    let autoLimited = false;
+    if (!isSchemaQuery(query)) {
+      const limitResult = injectAutoLimit(query, options?.maxRows);
+      finalQuery = limitResult.query;
+      autoLimited = limitResult.autoLimited;
+    }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            database: dbName,
-            query: query.substring(0, 200) + (query.length > 200 ? '...' : ''),
-            executionTime: result.executionTime,
-            rowCount: result.rowCount,
-            truncated: result.truncated,
-            cached: result.cached,
-            rows: result.rows,
-            fields: result.fields,
-          }, null, 2),
-        },
-      ],
-    };
+    const result = await adapter.query(finalQuery, parameters || []);
+
+    // autoLimited인 경우 totalRows 확인을 위해 COUNT 쿼리 실행
+    if (autoLimited && result.rows && result.rows.length > 0) {
+      try {
+        const countQuery = buildCountQuery(query);
+        if (countQuery) {
+          const countResult = await adapter.query(countQuery);
+          if (countResult.rows && countResult.rows.length > 0) {
+            const countVal = Object.values(countResult.rows[0])[0];
+            result.totalRows = Number(countVal);
+            if (result.totalRows > result.rows.length) {
+              result.truncated = true;
+            }
+          }
+        }
+      } catch {
+        // COUNT 실패는 무시
+      }
+    }
+
+    return formatMultiDbQueryResponse(result, dbName, query, options);
+  }
+
+  /**
+   * TIER 3: 테이블 스키마 확인 (SHOW COLUMNS 대체, 캐시 지원)
+   */
+  private schemaCache = new Map<string, { data: any[]; timestamp: number }>();
+  private readonly schemaCacheTTL = 5 * 60 * 1000; // 5분
+
+  private async handleSchemaCheck(table: string, database?: string) {
+    if (!table) {
+      throw new Error('Table name is required');
+    }
+
+    const dbName = database || this.connectionManager.getDefaultConnection();
+    if (!dbName) {
+      throw new Error('No database specified and no default connection configured');
+    }
+
+    const cacheKey = `${dbName}:${table}`;
+    const cached = this.schemaCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && (now - cached.timestamp) < this.schemaCacheTTL) {
+      return formatSchemaCheckResponse(table, cached.data, dbName, true, 0);
+    }
+
+    const adapter = this.connectionManager.getConnection(dbName);
+    const startTime = Date.now();
+    const result = await adapter.query(`SHOW COLUMNS FROM \`${table.replace(/`/g, '')}\``);
+    const executionTime = Date.now() - startTime;
+
+    // 캐시 저장
+    this.schemaCache.set(cacheKey, { data: result.rows, timestamp: now });
+
+    return formatSchemaCheckResponse(table, result.rows, dbName, false, executionTime);
   }
 
   /**
@@ -458,22 +563,26 @@ export class MultiDatabaseMCPServer {
     // 생성된 SQL 실행
     const result = await adapter.query(sql, []);
 
+    const columns = result.rows.length > 0
+      ? Object.keys(result.rows[0])
+      : (result.fields || []).map((f: any) => f.name || f);
+    const compactRows = result.rows.map((row: any) =>
+      columns.map((col: string) => row[col])
+    );
+
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({
-            database: dbName,
-            question,
+          text: toCompactJSON({
+            db: dbName,
             generatedSQL: sql,
-            parameters: [],
-            explanation: 'Simple query generated from natural language',
             confidence: 0.7,
-            executionTime: result.executionTime,
+            columns,
+            rows: compactRows,
             rowCount: result.rowCount,
-            rows: result.rows,
-            fields: result.fields,
-          }, null, 2),
+            executionTime: result.executionTime,
+          }),
         },
       ],
     };
@@ -491,15 +600,16 @@ export class MultiDatabaseMCPServer {
       queries.map(async ({ database, query, alias }) => {
         const adapter = this.connectionManager.getConnection(database);
         const result = await adapter.query(query);
+        const columns = result.rows.length > 0
+          ? Object.keys(result.rows[0])
+          : (result.fields || []).map((f: any) => f.name || f);
 
         return {
-          database,
-          alias: alias || database,
-          query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
-          executionTime: result.executionTime,
+          db: alias || database,
+          columns,
+          rows: result.rows.map((row: any) => columns.map((col: string) => row[col])),
           rowCount: result.rowCount,
-          rows: result.rows,
-          fields: result.fields,
+          executionTime: result.executionTime,
         };
       })
     );
@@ -508,14 +618,14 @@ export class MultiDatabaseMCPServer {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({
+          text: toCompactJSON({
             summary: {
               totalQueries: results.length,
               totalRows: results.reduce((sum, r) => sum + r.rowCount, 0),
               totalExecutionTime: results.reduce((sum, r) => sum + r.executionTime, 0),
             },
             results,
-          }, null, 2),
+          }),
         },
       ],
     };
@@ -532,7 +642,7 @@ export class MultiDatabaseMCPServer {
         {
           uri: 'database://connections',
           mimeType: 'application/json',
-          text: JSON.stringify(connections, null, 2),
+          text: JSON.stringify(connections),
         },
       ],
     };
@@ -554,7 +664,7 @@ export class MultiDatabaseMCPServer {
             {
               uri: `database://${database}/schema`,
               mimeType: 'application/json',
-              text: JSON.stringify(schema, null, 2),
+              text: JSON.stringify(schema),
             },
           ],
         };
@@ -569,7 +679,7 @@ export class MultiDatabaseMCPServer {
             {
               uri: `database://${database}/tables`,
               mimeType: 'application/json',
-              text: JSON.stringify(schema.tables, null, 2),
+              text: JSON.stringify(schema.tables),
             },
           ],
         };
@@ -618,4 +728,47 @@ export class MultiDatabaseMCPServer {
       throw error;
     }
   }
+}
+
+/**
+ * SELECT 쿼리에서 COUNT 쿼리 생성
+ * "SELECT a, b FROM t WHERE x = 1" → "SELECT COUNT(*) as cnt FROM t WHERE x = 1"
+ */
+function buildCountQuery(originalQuery: string): string | null {
+  const trimmed = originalQuery.trim().replace(/;$/, '');
+  const upper = trimmed.toUpperCase();
+
+  if (!upper.startsWith('SELECT')) return null;
+
+  // FROM 위치 찾기 (서브쿼리 내 FROM 제외)
+  let depth = 0;
+  let fromIndex = -1;
+  const words = upper.split(/\s+/);
+  let charPos = 0;
+
+  for (const word of words) {
+    const idx = upper.indexOf(word, charPos);
+    for (let i = charPos; i < idx; i++) {
+      if (upper[i] === '(') depth++;
+      if (upper[i] === ')') depth--;
+    }
+    if (word === 'FROM' && depth === 0 && fromIndex === -1) {
+      fromIndex = idx;
+      break;
+    }
+    charPos = idx + word.length;
+  }
+
+  if (fromIndex === -1) return null;
+
+  const fromClause = trimmed.substring(fromIndex);
+
+  // ORDER BY, LIMIT, OFFSET 제거
+  const cleaned = fromClause
+    .replace(/\bORDER\s+BY\b[^)]*$/i, '')
+    .replace(/\bLIMIT\s+\d+/i, '')
+    .replace(/\bOFFSET\s+\d+/i, '')
+    .trim();
+
+  return `SELECT COUNT(*) as cnt ${cleaned}`;
 }

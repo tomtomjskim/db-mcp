@@ -211,10 +211,11 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
       // 메트릭스 업데이트
       this.updateMetrics(true, executionTime);
 
+      const rowsArray = Array.isArray(rows) ? rows : [];
       const result: QueryResult = {
-        rows: Array.isArray(rows) ? rows : [],
-        fields: fields || [],
-        rowCount: Array.isArray(rows) ? rows.length : 0,
+        rows: rowsArray,
+        fields: rowsArray.length > 0 ? Object.keys(rowsArray[0]) : (fields || []).map((f: any) => f.name || String(f)),
+        rowCount: rowsArray.length,
         executionTime,
         metadata: {
           adapter: 'mysql',
@@ -284,10 +285,11 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
           const [rows, fields] = await connection.execute(query.sql, query.params || []);
           const executionTime = Date.now() - startTime;
 
+          const txRows = Array.isArray(rows) ? rows : [];
           results.push({
-            rows: Array.isArray(rows) ? rows : [],
-            fields: fields || [],
-            rowCount: Array.isArray(rows) ? rows.length : 0,
+            rows: txRows,
+            fields: txRows.length > 0 ? Object.keys(txRows[0]) : (fields || []).map((f: any) => f.name || String(f)),
+            rowCount: txRows.length,
             executionTime,
             metadata: {
               adapter: 'mysql',
