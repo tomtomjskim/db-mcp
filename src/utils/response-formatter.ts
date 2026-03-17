@@ -368,6 +368,9 @@ export function formatMultiDbQueryResponse(
 
   if (result.truncated) {
     response.truncated = true;
+    if (result.totalRows !== undefined) {
+      response.totalRows = result.totalRows;
+    }
   }
 
   return {

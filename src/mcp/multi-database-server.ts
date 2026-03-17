@@ -482,7 +482,9 @@ export class MultiDatabaseMCPServer {
     const result = await adapter.query(finalQuery, parameters || []);
 
     // autoLimited인 경우 totalRows 확인을 위해 COUNT 쿼리 실행
-    if (autoLimited && result.rows && result.rows.length > 0) {
+    // 단, 반환 행 수가 LIMIT 미만이면 실제 truncation이 아니므로 스킵 (집계 쿼리 등)
+    const limitUsed = injectAutoLimit(query, options?.maxRows).limit;
+    if (autoLimited && result.rows && result.rows.length >= limitUsed) {
       try {
         const countQuery = buildCountQuery(query);
         if (countQuery) {

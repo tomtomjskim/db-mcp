@@ -224,6 +224,37 @@
 
 ---
 
+## Phase 6.5: MCP 응답 토큰 최적화 (v1.1.0) ✅ 완료
+
+### 6.5.1 TIER 1: 기본 최적화
+- [x] JSON Pretty-print 제거 (~30% 토큰 절감)
+- [x] Array-of-Arrays 변환 (~40% 절감)
+- [x] fields 메타데이터 경량화 (FieldPacket → string[])
+- [x] 에코 필드 제거 (database, query, cached)
+
+### 6.5.2 TIER 2: 스마트 응답
+- [x] `format` 파라미터 (compact/table/minimal)
+- [x] 자동 LIMIT 주입 (기본 50행)
+- [x] SHOW COLUMNS 경량 TSV 포맷
+- [x] `maxRows` / `preview` 파라미터
+
+### 6.5.3 TIER 3: 고급 기능
+- [x] `schema_check` 전용 도구 (5분 TTL 캐시)
+- [x] 적응형 포맷 (결과 크기 기반 자동 선택)
+- [x] 집계 쿼리 자동 감지
+
+### 6.5.4 버그 수정
+- [x] 집계 쿼리 truncated 오표시 수정
+- [x] 자동 LIMIT 시 totalRows 누락 수정
+
+### 6.5.5 문서화
+- [x] 토큰 최적화 가이드 (`docs/token-optimization.md`)
+- [x] 테스트 보고서 (`docs/test-report-v1.1.0.md`)
+- [x] CHANGELOG.md 릴리즈 노트
+- [x] 테스트 체크리스트 16/16 PASS
+
+---
+
 ## 공통 작업
 
 ### 개발 환경
@@ -263,6 +294,16 @@
 ---
 
 ## 📊 현재 프로젝트 상태
+
+### ✅ v1.1 완료 (2026-03-17)
+
+**토큰 최적화:**
+- ✅ **TIER 1-3 토큰 최적화**: 응답 토큰 86% 절감 (14.5k → ~2k)
+- ✅ **schema_check 전용 도구**: SHOW COLUMNS 대체, 5분 캐시
+- ✅ **적응형 응답 포맷**: compact/table/minimal 자동 선택
+- ✅ **자동 LIMIT 주입**: LIMIT 없는 SELECT에 기본 50행 제한
+- ✅ **preview 모드**: 대형 테이블 샘플링 (~200 토큰)
+- ✅ **버그 수정 2건**: 집계 쿼리 truncated 오표시, totalRows 누락
 
 ### ✅ v1.0 완료 (2025)
 
@@ -399,6 +440,6 @@ src/
 
 ---
 
-**마지막 업데이트**: 2025-01-06
-**버전**: 1.0.0
+**마지막 업데이트**: 2026-03-17
+**버전**: 1.1.0
 **상태**: ✅ Production Ready
