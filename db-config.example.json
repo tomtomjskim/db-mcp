@@ -90,8 +90,8 @@
       "tags": ["development", "testing", "mysql", "local"],
       "connectionLimit": 5
     },
-    "frecto-dev": {
-      "name": "frecto-dev",
+    "burst-dev": {
+      "name": "burst-dev",
       "type": "mysql",
       "host": "your-rds-endpoint.rds.amazonaws.com",
       "port": 3306,

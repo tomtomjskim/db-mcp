@@ -22,6 +22,7 @@ build/
 # Logs
 logs/
 *.log
+server-test.err
 
 # Runtime data
 pids/

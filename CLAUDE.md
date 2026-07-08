@@ -98,7 +98,7 @@ The adapter pattern allows supporting multiple database types:
 
 - **MySQL Adapter**: Uses `mysql2` with connection pooling
 - **PostgreSQL Adapter**: Uses `pg` with connection pooling
-- **Future**: SQLite, ClickHouse planned
+- **Future**: SQLite, ClickHouse (planned, not implemented)
 
 Each adapter implements:
 - Connection management
