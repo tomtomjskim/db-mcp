@@ -15,8 +15,10 @@ export interface DatabaseConfig {
   acquireTimeout?: number;
   timeout?: number;
   connectionLimit?: number;
+  maxIdle?: number;
   queueLimit?: number;
   idleTimeout?: number;
+  idleDisconnectMs?: number;
 }
 
 export interface SecurityConfig {

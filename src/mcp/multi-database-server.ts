@@ -98,7 +98,7 @@ export class MultiDatabaseMCPServer {
   private setupHandlers(): void {
     // 도구 목록 제공
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      const connectionNames = this.connectionManager.getConnectionNames();
+      const connectionNames = this.connectionManager.getConfiguredConnectionNames();
       const tools: Tool[] = [];
 
       // 기본 도구들
@@ -240,7 +240,7 @@ export class MultiDatabaseMCPServer {
 
     // 리소스 목록 제공
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      const connectionNames = this.connectionManager.getConnectionNames();
+      const connectionNames = this.connectionManager.getConfiguredConnectionNames();
       const resources: Resource[] = [];
 
       // 데이터베이스 목록 리소스
@@ -412,7 +412,7 @@ export class MultiDatabaseMCPServer {
    */
   private async handleHealthCheck(database?: string) {
     if (database) {
-      const adapter = this.connectionManager.getConnection(database);
+      const adapter = await this.connectionManager.getConnection(database);
       const health = await adapter.healthCheck();
 
       return {
@@ -468,7 +468,7 @@ export class MultiDatabaseMCPServer {
     if (!dbName) {
       throw new Error('No database specified and no default connection configured');
     }
-    const adapter = this.connectionManager.getConnection(dbName);
+    const adapter = await this.connectionManager.getConnection(dbName);
 
     // TIER 2: 자동 LIMIT 주입 (스키마 쿼리 제외)
     let finalQuery = query;
@@ -529,7 +529,7 @@ export class MultiDatabaseMCPServer {
       return formatSchemaCheckResponse(table, cached.data, dbName, true, 0);
     }
 
-    const adapter = this.connectionManager.getConnection(dbName);
+    const adapter = await this.connectionManager.getConnection(dbName);
     const startTime = Date.now();
     const result = await adapter.query(`SHOW COLUMNS FROM \`${table.replace(/`/g, '')}\``);
     const executionTime = Date.now() - startTime;
@@ -553,7 +553,7 @@ export class MultiDatabaseMCPServer {
       throw new Error('No database specified and no default connection configured');
     }
 
-    const adapter = this.connectionManager.getConnection(dbName);
+    const adapter = await this.connectionManager.getConnection(dbName);
     const schemaAnalyzer = adapter.getSchemaAnalyzer();
 
     // 스키마 정보 가져오기
@@ -600,7 +600,7 @@ export class MultiDatabaseMCPServer {
 
     const results = await Promise.all(
       queries.map(async ({ database, query, alias }) => {
-        const adapter = this.connectionManager.getConnection(database);
+        const adapter = await this.connectionManager.getConnection(database);
         const result = await adapter.query(query);
         const columns = result.rows.length > 0
           ? Object.keys(result.rows[0])
@@ -654,7 +654,7 @@ export class MultiDatabaseMCPServer {
    * 데이터베이스별 리소스 읽기
    */
   private async handleReadDatabaseResource(database: string, resource: string) {
-    const adapter = this.connectionManager.getConnection(database);
+    const adapter = await this.connectionManager.getConnection(database);
 
     switch (resource) {
       case 'schema': {
@@ -698,15 +698,17 @@ export class MultiDatabaseMCPServer {
    */
   async start(): Promise<void> {
     try {
-      // 모든 데이터베이스에 연결
-      await this.connectionManager.connectAll();
+      // 시작 시 명시된 데이터베이스만 연결한다. 기본값은 lazy connection이다.
+      await this.connectionManager.connectStartup();
 
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
 
       logger.info('Multi-database MCP server started successfully', {
-        connectionCount: this.connectionManager.getConnectionNames().length,
-        connections: this.connectionManager.getConnectionNames(),
+        configuredConnectionCount: this.connectionManager.getConfiguredConnectionNames().length,
+        connectedConnectionCount: this.connectionManager.getConnectionNames().length,
+        configuredConnections: this.connectionManager.getConfiguredConnectionNames(),
+        connectedConnections: this.connectionManager.getConnectionNames(),
       });
     } catch (error) {
       logger.error('Failed to start multi-database MCP server', {

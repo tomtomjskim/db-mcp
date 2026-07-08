@@ -41,6 +41,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
   private schemaAnalyzer: MySQLSchemaAnalyzer;
   private dataProfiler: MySQLDataProfiler;
   private isShuttingDown = false;
+  private idleDisconnectTimer: NodeJS.Timeout | null = null;
 
   constructor(options: AdapterOptions) {
     super();
@@ -82,6 +83,9 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
     }
 
     try {
+      this.isShuttingDown = false;
+      this.clearIdleDisconnectTimer();
+
       logConnection('connect', {
         host: this.config.host,
         database: this.config.database,
@@ -96,6 +100,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
         database: this.config.database,
         waitForConnections: true,
         connectionLimit: this.options.poolOptions?.max || 10,
+        ...(this.options.poolOptions?.maxIdle !== undefined ? { maxIdle: this.options.poolOptions.maxIdle } : {}),
         queueLimit: 0,
         idleTimeout: this.options.poolOptions?.idleTimeoutMillis || 300000,
         // acquireTimeout은 mysql2에서 지원하지 않는 옵션이므로 제거
@@ -139,6 +144,8 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
         connectionLimit: poolConfig.connectionLimit
       });
 
+      this.scheduleIdleDisconnect();
+
     } catch (error) {
       this.connectionStatus.isConnected = false;
       this.emit('disconnected', { adapter: this.id, error });
@@ -161,6 +168,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
     }
 
     try {
+      this.clearIdleDisconnectTimer();
       this.isShuttingDown = true;
 
       logConnection('disconnect', {
@@ -202,6 +210,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
     }
 
     const startTime = Date.now();
+    this.clearIdleDisconnectTimer();
     this.connectionStatus.activeQueries++;
 
     try {
@@ -260,6 +269,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
 
     } finally {
       this.connectionStatus.activeQueries--;
+      this.scheduleIdleDisconnect();
     }
   }
 
@@ -271,6 +281,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
       throw new Error('MySQL adapter not connected');
     }
 
+    this.clearIdleDisconnectTimer();
     const connection = await this.pool.getConnection();
     const results: QueryResult[] = [];
 
@@ -331,6 +342,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
 
     } finally {
       connection.release();
+      this.scheduleIdleDisconnect();
     }
   }
 
@@ -351,6 +363,7 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
    */
   async healthCheck(): Promise<HealthStatus> {
     const startTime = Date.now();
+    this.clearIdleDisconnectTimer();
 
     try {
       if (!this.pool) {
@@ -400,6 +413,8 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
       this.emit('health_check_failed', { adapter: this.id, error: healthStatus.error });
 
       return healthStatus;
+    } finally {
+      this.scheduleIdleDisconnect();
     }
   }
 
@@ -508,6 +523,43 @@ export class MySQLAdapter extends EventEmitter implements EventEmittingAdapter {
     // 주기적으로 메트릭스 이벤트 발생
     if (this.metrics.queriesExecuted % 100 === 0) {
       this.emit('metrics_collected', { adapter: this.id, metrics: this.getMetrics() });
+    }
+  }
+
+  private clearIdleDisconnectTimer(): void {
+    if (this.idleDisconnectTimer) {
+      clearTimeout(this.idleDisconnectTimer);
+      this.idleDisconnectTimer = null;
+    }
+  }
+
+  private scheduleIdleDisconnect(): void {
+    const idleDisconnectMs = this.config.idleDisconnectMs ?? 60000;
+    if (idleDisconnectMs <= 0 || !this.pool || this.isShuttingDown) {
+      return;
+    }
+
+    this.clearIdleDisconnectTimer();
+    this.idleDisconnectTimer = setTimeout(() => {
+      if (!this.pool || this.isShuttingDown) {
+        return;
+      }
+
+      if (this.connectionStatus.activeQueries > 0) {
+        this.scheduleIdleDisconnect();
+        return;
+      }
+
+      this.disconnect().catch((error) => {
+        logger.error('MySQL idle disconnect failed', {
+          id: this.id,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      });
+    }, idleDisconnectMs);
+
+    if (typeof this.idleDisconnectTimer.unref === 'function') {
+      this.idleDisconnectTimer.unref();
     }
   }
 }

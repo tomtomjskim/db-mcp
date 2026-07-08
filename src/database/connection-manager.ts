@@ -15,7 +15,11 @@ export interface DatabaseConnectionConfig extends DatabaseConfig {
   name: string;
   description?: string;
   tags?: string[];
+  enabled?: boolean;
+  connectOnStartup?: boolean;
 }
+
+type AdapterFactory = (config: DatabaseConnectionConfig) => DatabaseAdapter;
 
 /**
  * 다중 데이터베이스 연결 관리자
@@ -25,50 +29,38 @@ export class DatabaseConnectionManager {
   private connections = new Map<string, DatabaseAdapter>();
   private config: MultiDatabaseConfig;
   private defaultConnectionName?: string | undefined;
+  private adapterFactory: AdapterFactory;
 
-  constructor(config: MultiDatabaseConfig) {
+  constructor(config: MultiDatabaseConfig, adapterFactory: AdapterFactory = createDatabaseAdapter) {
     this.config = config;
     this.defaultConnectionName = config.defaultConnection || undefined;
+    this.adapterFactory = adapterFactory;
   }
 
   /**
-   * 모든 데이터베이스에 연결
+   * 시작 시 명시된 데이터베이스만 연결
+   */
+  async connectStartup(): Promise<void> {
+    const startupNames = this.getConfiguredConnectionNames()
+      .filter(name => this.config.connections[name]?.connectOnStartup === true);
+
+    await Promise.all(startupNames.map(name => this.getConnection(name)));
+
+    logger.info('Startup database connections completed', {
+      connectionCount: this.connections.size,
+      connectionNames: this.getConnectionNames()
+    });
+  }
+
+  /**
+   * 모든 활성 데이터베이스에 명시적으로 연결
    */
   async connectAll(): Promise<void> {
-    const connectionPromises = Object.entries(this.config.connections).map(
-      async ([name, connectionConfig]) => {
-        try {
-          logger.info('Connecting to database', {
-            name,
-            host: connectionConfig.host,
-            database: connectionConfig.database,
-            type: connectionConfig.type
-          });
+    await Promise.all(this.getConfiguredConnectionNames().map(name => this.getConnection(name)));
 
-          const adapter = createDatabaseAdapter(connectionConfig);
-          await adapter.connect();
-
-          this.connections.set(name, adapter);
-
-          logger.info('Database connected successfully', {
-            name,
-            adapterId: adapter.id
-          });
-        } catch (error) {
-          logger.error('Failed to connect to database', {
-            name,
-            error: error instanceof Error ? error.message : 'Unknown error'
-          });
-          throw new Error(`Failed to connect to database '${name}': ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-    );
-
-    await Promise.all(connectionPromises);
-
-    logger.info('All databases connected', {
+    logger.info('All configured databases connected', {
       connectionCount: this.connections.size,
-      connectionNames: Array.from(this.connections.keys())
+      connectionNames: this.getConnectionNames()
     });
   }
 
@@ -99,19 +91,45 @@ export class DatabaseConnectionManager {
   /**
    * 특정 데이터베이스 어댑터 조회
    */
-  getConnection(name?: string): DatabaseAdapter {
-    const connectionName = name || this.defaultConnectionName;
-
-    if (!connectionName) {
-      throw new Error('No connection name specified and no default connection configured');
+  async getConnection(name?: string): Promise<DatabaseAdapter> {
+    const connectionName = this.resolveConnectionName(name);
+    const existingAdapter = this.connections.get(connectionName);
+    if (existingAdapter) {
+      return existingAdapter;
     }
 
-    const adapter = this.connections.get(connectionName);
-    if (!adapter) {
-      throw new Error(`Database connection '${connectionName}' not found. Available: ${Array.from(this.connections.keys()).join(', ')}`);
+    const connectionConfig = this.config.connections[connectionName];
+    if (!connectionConfig || connectionConfig.enabled === false) {
+      throw new Error(`Database connection '${connectionName}' not configured. Available: ${this.getConfiguredConnectionNames().join(', ')}`);
     }
 
-    return adapter;
+    try {
+      logger.info('Connecting to database', {
+        name: connectionName,
+        host: connectionConfig.host,
+        database: connectionConfig.database,
+        type: connectionConfig.type
+      });
+
+      const adapter = this.adapterFactory(connectionConfig);
+      this.registerDisconnectCleanup(connectionName, adapter);
+      await adapter.connect();
+
+      this.connections.set(connectionName, adapter);
+
+      logger.info('Database connected successfully', {
+        name: connectionName,
+        adapterId: adapter.id
+      });
+
+      return adapter;
+    } catch (error) {
+      logger.error('Failed to connect to database', {
+        name: connectionName,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw new Error(`Failed to connect to database '${connectionName}': ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**
@@ -119,6 +137,15 @@ export class DatabaseConnectionManager {
    */
   getConnectionNames(): string[] {
     return Array.from(this.connections.keys());
+  }
+
+  /**
+   * 설정된 활성 데이터베이스 목록 조회
+   */
+  getConfiguredConnectionNames(): string[] {
+    return Object.entries(this.config.connections)
+      .filter(([, connection]) => connection.enabled !== false)
+      .map(([name]) => name);
   }
 
   /**
@@ -135,19 +162,20 @@ export class DatabaseConnectionManager {
     description?: string | undefined;
     tags?: string[] | undefined;
   } {
-    const connectionName = name || this.defaultConnectionName;
-    if (!connectionName) {
-      throw new Error('No connection name specified');
-    }
-
-    const adapter = this.getConnection(connectionName);
+    const connectionName = this.resolveConnectionName(name);
     const connectionConfig = this.config.connections[connectionName];
-    const connectionInfo = adapter.getConnectionInfo();
+    if (!connectionConfig || connectionConfig.enabled === false) {
+      throw new Error(`Connection '${connectionName}' not configured`);
+    }
 
     return {
       name: connectionName,
-      ...connectionInfo,
-      isConnected: true,
+      host: connectionConfig.host,
+      port: connectionConfig.port,
+      database: connectionConfig.database,
+      type: connectionConfig.type || 'mysql',
+      ssl: !!connectionConfig.ssl,
+      isConnected: this.connections.has(connectionName),
       description: connectionConfig?.description || undefined,
       tags: connectionConfig?.tags || undefined
     };
@@ -167,7 +195,7 @@ export class DatabaseConnectionManager {
     description?: string | undefined;
     tags?: string[] | undefined;
   }> {
-    return this.getConnectionNames().map(name => this.getConnectionInfo(name));
+    return this.getConfiguredConnectionNames().map(name => this.getConnectionInfo(name));
   }
 
   /**
@@ -180,7 +208,16 @@ export class DatabaseConnectionManager {
   }>> {
     const healthChecks = Object.fromEntries(
       await Promise.all(
-        Array.from(this.connections.entries()).map(async ([name, adapter]) => {
+        this.getConfiguredConnectionNames().map(async (name) => {
+          const adapter = this.connections.get(name);
+          if (!adapter) {
+            return [name, {
+              isHealthy: false,
+              responseTime: 0,
+              error: 'Not connected (lazy)'
+            }];
+          }
+
           try {
             const health = await adapter.healthCheck();
             return [name, {
@@ -207,17 +244,17 @@ export class DatabaseConnectionManager {
    */
   getConnectionsByTag(tag: string): string[] {
     return Object.entries(this.config.connections)
-      .filter(([, config]) => config.tags?.includes(tag))
+      .filter(([, config]) => config.enabled !== false && config.tags?.includes(tag))
       .map(([name]) => name)
-      .filter(name => this.connections.has(name));
+      .filter(name => this.config.connections[name] !== undefined);
   }
 
   /**
    * 데이터베이스 타입별 연결 필터링
    */
   getConnectionsByType(type: DatabaseType): string[] {
-    return Array.from(this.connections.entries())
-      .filter(([, adapter]) => adapter.type === type)
+    return Object.entries(this.config.connections)
+      .filter(([, config]) => config.enabled !== false && (config.type || 'mysql') === type)
       .map(([name]) => name);
   }
 
@@ -225,7 +262,7 @@ export class DatabaseConnectionManager {
    * 기본 연결 설정
    */
   setDefaultConnection(name: string): void {
-    if (!this.connections.has(name)) {
+    if (!this.config.connections[name] || this.config.connections[name].enabled === false) {
       throw new Error(`Connection '${name}' not found`);
     }
     this.defaultConnectionName = name;
@@ -282,14 +319,40 @@ export class DatabaseConnectionManager {
     supportedTypes: DatabaseType[];
   } {
     const supportedTypes = Array.from(
-      new Set(Array.from(this.connections.values()).map(adapter => adapter.type))
+      new Set(this.getConfiguredConnectionNames().map(name => this.config.connections[name]?.type || 'mysql'))
     ) as DatabaseType[];
 
     return {
-      totalConnections: this.connections.size,
+      totalConnections: this.getConfiguredConnectionNames().length,
       connectedDatabases: this.getConnectionNames(),
       defaultConnection: this.defaultConnectionName || undefined,
       supportedTypes
     };
+  }
+
+  private resolveConnectionName(name?: string): string {
+    const connectionName = name || this.defaultConnectionName;
+
+    if (!connectionName) {
+      throw new Error('No connection name specified and no default connection configured');
+    }
+
+    return connectionName;
+  }
+
+  private registerDisconnectCleanup(name: string, adapter: DatabaseAdapter): void {
+    const eventAdapter = adapter as DatabaseAdapter & {
+      on?: (event: string, listener: () => void) => void;
+    };
+
+    if (typeof eventAdapter.on !== 'function') {
+      return;
+    }
+
+    eventAdapter.on('disconnected', () => {
+      if (this.connections.get(name) === adapter) {
+        this.connections.delete(name);
+      }
+    });
   }
 }

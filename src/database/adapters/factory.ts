@@ -1,10 +1,7 @@
-import { createRequire } from 'module';
 import { DatabaseConfig } from '../../types/index.js';
 import { DatabaseAdapter, DatabaseType, AdapterOptions } from './base/database-adapter.js';
 import { MySQLAdapter } from './mysql/mysql-adapter.js';
 import { PostgreSQLAdapter } from './postgresql/postgresql-adapter.js';
-
-const require = createRequire(import.meta.url);
 
 /**
  * 어댑터 등록 정보
@@ -46,28 +43,14 @@ export class DatabaseAdapterFactory {
     this.registerAdapter({
       type: 'mysql',
       adapterClass: MySQLAdapter,
-      isAvailable: () => {
-        try {
-          require('mysql2');
-          return true;
-        } catch {
-          return false;
-        }
-      }
+      isAvailable: () => true
     });
 
     // PostgreSQL 어댑터 등록
     this.registerAdapter({
       type: 'postgresql',
       adapterClass: PostgreSQLAdapter,
-      isAvailable: () => {
-        try {
-          require('pg');
-          return true;
-        } catch {
-          return false;
-        }
-      }
+      isAvailable: () => true
     });
   }
 
@@ -123,6 +106,7 @@ export class DatabaseAdapterFactory {
       poolOptions: {
         min: 2,
         max: config.connectionLimit || 10,
+        maxIdle: config.maxIdle ?? 1,
         idleTimeoutMillis: config.idleTimeout || 300000,
         acquireTimeoutMillis: config.acquireTimeout || 60000,
         ...options?.poolOptions

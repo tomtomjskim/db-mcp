@@ -112,8 +112,20 @@ export class MultiDatabaseConfigLoader {
             case 'connection_limit':
               connections[connectionName].connectionLimit = parseInt(value);
               break;
+            case 'max_idle':
+              connections[connectionName].maxIdle = parseInt(value);
+              break;
             case 'idle_timeout':
               connections[connectionName].idleTimeout = parseInt(value);
+              break;
+            case 'idle_disconnect_ms':
+              connections[connectionName].idleDisconnectMs = parseInt(value);
+              break;
+            case 'enabled':
+              connections[connectionName].enabled = this.parseBoolean(value);
+              break;
+            case 'connect_on_startup':
+              connections[connectionName].connectOnStartup = this.parseBoolean(value);
               break;
           }
 
@@ -159,8 +171,20 @@ export class MultiDatabaseConfigLoader {
         password: process.env.MYSQL_PASSWORD || '',
         database: process.env.MYSQL_DB || '',
         description: 'Legacy MySQL connection',
-        tags: ['legacy', 'mysql']
+        tags: ['legacy', 'mysql'],
+        connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT || '10'),
+        idleTimeout: parseInt(process.env.MYSQL_IDLE_TIMEOUT || '300000')
       };
+
+      if (process.env.MYSQL_MAX_IDLE) {
+        connections.mysql.maxIdle = parseInt(process.env.MYSQL_MAX_IDLE);
+      }
+      if (process.env.MYSQL_IDLE_DISCONNECT_MS) {
+        connections.mysql.idleDisconnectMs = parseInt(process.env.MYSQL_IDLE_DISCONNECT_MS);
+      }
+      if (process.env.MYSQL_CONNECT_ON_STARTUP) {
+        connections.mysql.connectOnStartup = this.parseBoolean(process.env.MYSQL_CONNECT_ON_STARTUP);
+      }
 
       // SSL 설정
       if (process.env.MYSQL_SSL_MODE) {
@@ -184,8 +208,20 @@ export class MultiDatabaseConfigLoader {
         password: process.env.POSTGRES_PASSWORD || '',
         database: process.env.POSTGRES_DB || '',
         description: 'Legacy PostgreSQL connection',
-        tags: ['legacy', 'postgresql']
+        tags: ['legacy', 'postgresql'],
+        connectionLimit: parseInt(process.env.POSTGRES_CONNECTION_LIMIT || '10'),
+        idleTimeout: parseInt(process.env.POSTGRES_IDLE_TIMEOUT || '300000')
       };
+
+      if (process.env.POSTGRES_MAX_IDLE) {
+        connections.postgresql.maxIdle = parseInt(process.env.POSTGRES_MAX_IDLE);
+      }
+      if (process.env.POSTGRES_IDLE_DISCONNECT_MS) {
+        connections.postgresql.idleDisconnectMs = parseInt(process.env.POSTGRES_IDLE_DISCONNECT_MS);
+      }
+      if (process.env.POSTGRES_CONNECT_ON_STARTUP) {
+        connections.postgresql.connectOnStartup = this.parseBoolean(process.env.POSTGRES_CONNECT_ON_STARTUP);
+      }
 
       // SSL 설정
       if (process.env.POSTGRES_SSL_MODE) {
@@ -288,6 +324,10 @@ export class MultiDatabaseConfigLoader {
     }
 
     for (const [name, connection] of Object.entries(config.connections)) {
+      if (connection.enabled === false) {
+        continue;
+      }
+
       if (!connection.host) {
         throw new Error(`Connection '${name}': host is required`);
       }
@@ -309,5 +349,9 @@ export class MultiDatabaseConfigLoader {
     if (config.defaultConnection && !config.connections[config.defaultConnection]) {
       throw new Error(`Default connection '${config.defaultConnection}' not found in connections`);
     }
+  }
+
+  private static parseBoolean(value: string): boolean {
+    return ['true', '1', 'yes', 'on'].includes(value.toLowerCase());
   }
 }

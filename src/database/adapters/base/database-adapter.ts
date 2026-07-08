@@ -199,6 +199,7 @@ export interface AdapterOptions {
   poolOptions?: {
     min?: number;
     max?: number;
+    maxIdle?: number;
     idleTimeoutMillis?: number;
     acquireTimeoutMillis?: number;
   };
